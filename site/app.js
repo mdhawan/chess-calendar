@@ -656,20 +656,14 @@ function bind() {
       render();
       if (state.view === "calendar" && state.calendar) state.calendar.updateSize();
       if (state.view === "map" && state.map) state.map.invalidateSize();
-      // On mobile the sidebar is a drawer covering the content; picking a view
-      // means the user wants to see it, so close the drawer.
-      closeSidebar();
     });
   });
 
-  // Mobile off-canvas sidebar toggle. On desktop the toggle button is
-  // display:none, so these listeners are simply never reachable.
-  $("sidebar-toggle").addEventListener("click", () => {
-    const app = $("app");
-    if (app.classList.contains("sidebar-open")) closeSidebar();
-    else openSidebar();
-  });
-  $("sidebar-backdrop").addEventListener("click", closeSidebar);
+  // Collapse the left pane in place: "«" (inside the pane) hides it, "☰"
+  // (floating, only visible while collapsed) brings it back. Works on all
+  // screen sizes; on mobile it starts collapsed so the view gets full width.
+  $("sidebar-collapse").addEventListener("click", () => setSidebarCollapsed(true));
+  $("sidebar-show").addEventListener("click", () => setSidebarCollapsed(false));
 
   // Static build: no server to trigger a scrape, so the button is hidden.
   // Data refreshes on the GitHub Actions cron (see .github/workflows/refresh.yml).
@@ -679,26 +673,20 @@ function bind() {
   $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") $("modal").classList.add("hidden"); });
 }
 
-function openSidebar() {
-  const app = $("app");
-  app.classList.add("sidebar-open");
-  $("sidebar-toggle").setAttribute("aria-expanded", "true");
-}
-
-function closeSidebar() {
-  const app = $("app");
-  if (!app.classList.contains("sidebar-open")) return;
-  app.classList.remove("sidebar-open");
-  $("sidebar-toggle").setAttribute("aria-expanded", "false");
-  // The content area just grew back to full width — let the active view re-fit
-  // it after the drawer's slide-out transition (250ms in styles.css).
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  // The content area changed width — let the active view re-fit it. Deferred so
+  // it runs after layout reflows to the new grid columns.
   setTimeout(() => {
     if (state.view === "map" && state.map) state.map.invalidateSize();
     if (state.view === "calendar" && state.calendar) state.calendar.updateSize();
-  }, 280);
+  }, 0);
 }
 
 bind();
+// Start collapsed on narrow screens so the map/calendar/list get full width;
+// the user opens the pane with the "☰" button when they want to filter.
+if (window.matchMedia("(max-width: 768px)").matches) setSidebarCollapsed(true);
 fetchAll().catch((e) => {
   $("count").textContent = "Failed to load tournaments.json.";
   console.error(e);
