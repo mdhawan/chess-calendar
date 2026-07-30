@@ -41,6 +41,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes."
           else
-            git commit -m "chore: refresh tournament data [skip ci]"
+            # No [skip ci]: this push to site/** is exactly what triggers the
+            # Pages deploy to publish the new data. refresh.yml itself only runs
+            # on schedule/workflow_dispatch, so there's no risk of a commit loop.
+            git commit -m "chore: refresh tournament data"
             git push
           fi
