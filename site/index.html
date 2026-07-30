@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chess Calendar — India</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css?v=1" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <h1>Chess Calendar</h1>
+      <p class="subtitle">India · OTB tournaments</p>
+
+      <div class="filter">
+        <label>Preferred states</label>
+        <div class="states-head">
+          <span id="states-summary">All states</span>
+          <span class="states-actions">
+            <button type="button" id="states-all">All</button>
+            <button type="button" id="states-clear">Clear</button>
+          </span>
+        </div>
+        <div id="f-states" class="states-list"></div>
+      </div>
+
+      <div class="filter">
+        <label>Format</label>
+        <select id="f-format">
+          <option value="">All formats</option>
+          <option value="classical">Classical</option>
+          <option value="rapid">Rapid</option>
+          <option value="blitz">Blitz</option>
+        </select>
+      </div>
+
+      <div class="filter">
+        <label>Age category</label>
+        <select id="f-age">
+          <option value="">All ages</option>
+        </select>
+      </div>
+
+      <div class="filter">
+        <label>Eligibility</label>
+        <select id="f-open">
+          <option value="">All tournaments</option>
+          <option value="open">Open to all</option>
+          <option value="restricted">Category-restricted</option>
+        </select>
+      </div>
+
+      <div class="filter">
+        <label>Source</label>
+        <select id="f-source">
+          <option value="">All sources</option>
+        </select>
+      </div>
+
+      <div class="filter checkbox">
+        <label><input type="checkbox" id="f-fide" /> FIDE-rated only</label>
+      </div>
+
+      <div class="filter checkbox">
+        <label><input type="checkbox" id="f-collapse" checked /> Collapse age variants</label>
+      </div>
+
+      <div class="filter">
+        <label>View</label>
+        <div class="view-tabs">
+          <button data-view="calendar" class="active">Calendar</button>
+          <button data-view="list">List</button>
+          <button data-view="map">Map</button>
+        </div>
+      </div>
+
+      <div class="meta">
+        <div id="count">—</div>
+        <div id="last-refresh"></div>
+      </div>
+    </aside>
+
+    <main>
+      <div id="empty-banner" class="empty-banner hidden"></div>
+      <div id="calendar" class="view"></div>
+      <div id="list" class="view hidden"></div>
+      <div id="map-view" class="view hidden">
+        <div id="map-toolbar">
+          <button type="button" id="map-prev" aria-label="Previous month">‹</button>
+          <span id="map-month"></span>
+          <button type="button" id="map-next" aria-label="Next month">›</button>
+          <button type="button" id="map-today">Today</button>
+        </div>
+        <div id="map"></div>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <button class="close" id="modal-close">×</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="./app.js?v=1"></script>
+</body>
+</html>

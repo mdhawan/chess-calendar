@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+# SQLite WAL/SHM sidecars — the .sqlite itself IS committed (it carries the
+# detail cache between Actions runs), but its transient sidecars must not be.
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
