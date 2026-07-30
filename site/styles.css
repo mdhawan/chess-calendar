@@ -123,6 +123,40 @@ main { padding: 20px; overflow: hidden; display: flex; flex-direction: column; g
 .map-tip { font-size: 12px; line-height: 1.45; }
 .map-tip strong { font-size: 13px; }
 
+/* Hamburger toggle + backdrop — hidden on desktop, shown at the mobile breakpoint */
+#sidebar-toggle { display: none; }
+#sidebar-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  /* Content is full-width; the sidebar becomes an off-canvas drawer over it. */
+  #app { grid-template-columns: 1fr; }
+
+  #sidebar-toggle {
+    display: block; position: fixed; top: 12px; left: 12px; z-index: 60;
+    padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+
+  .sidebar {
+    position: fixed; top: 0; left: 0; z-index: 70;
+    width: 82%; max-width: 320px; height: 100%;
+    transform: translateX(-100%); transition: transform 0.25s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.15);
+  }
+  #app.sidebar-open .sidebar { transform: translateX(0); }
+
+  #sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 65;
+    background: rgba(0,0,0,0.4); opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  #app.sidebar-open #sidebar-backdrop { opacity: 1; pointer-events: auto; }
+
+  /* Give the content full height and clear the floating toggle button. */
+  main { padding: 56px 12px 12px; }
+}
+
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal.hidden { display: none; }
 .modal-card { background: white; border-radius: 10px; padding: 24px; max-width: 540px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }

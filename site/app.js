@@ -656,8 +656,20 @@ function bind() {
       render();
       if (state.view === "calendar" && state.calendar) state.calendar.updateSize();
       if (state.view === "map" && state.map) state.map.invalidateSize();
+      // On mobile the sidebar is a drawer covering the content; picking a view
+      // means the user wants to see it, so close the drawer.
+      closeSidebar();
     });
   });
+
+  // Mobile off-canvas sidebar toggle. On desktop the toggle button is
+  // display:none, so these listeners are simply never reachable.
+  $("sidebar-toggle").addEventListener("click", () => {
+    const app = $("app");
+    if (app.classList.contains("sidebar-open")) closeSidebar();
+    else openSidebar();
+  });
+  $("sidebar-backdrop").addEventListener("click", closeSidebar);
 
   // Static build: no server to trigger a scrape, so the button is hidden.
   // Data refreshes on the GitHub Actions cron (see .github/workflows/refresh.yml).
@@ -665,6 +677,25 @@ function bind() {
   if (refreshBtn) refreshBtn.remove();
   $("modal-close").addEventListener("click", () => $("modal").classList.add("hidden"));
   $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") $("modal").classList.add("hidden"); });
+}
+
+function openSidebar() {
+  const app = $("app");
+  app.classList.add("sidebar-open");
+  $("sidebar-toggle").setAttribute("aria-expanded", "true");
+}
+
+function closeSidebar() {
+  const app = $("app");
+  if (!app.classList.contains("sidebar-open")) return;
+  app.classList.remove("sidebar-open");
+  $("sidebar-toggle").setAttribute("aria-expanded", "false");
+  // The content area just grew back to full width — let the active view re-fit
+  // it after the drawer's slide-out transition (250ms in styles.css).
+  setTimeout(() => {
+    if (state.view === "map" && state.map) state.map.invalidateSize();
+    if (state.view === "calendar" && state.calendar) state.calendar.updateSize();
+  }, 280);
 }
 
 bind();
