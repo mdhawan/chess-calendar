@@ -9,6 +9,14 @@ on:
       - "site/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch: {}
+  # refresh.yml calls this after committing new data — its own push can't fire
+  # the `push` trigger above (see the note in refresh.yml).
+  workflow_call:
+    inputs:
+      ref:
+        description: "Ref to publish. Empty = the ref that triggered this run."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +35,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # On a workflow_call from refresh.yml, github.sha is the caller's trigger
+      # commit — i.e. *before* the data commit. Publish the ref it hands us.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
