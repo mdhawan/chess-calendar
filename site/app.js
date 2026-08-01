@@ -45,9 +45,14 @@ const state = {
   collapse: true,
   view: "calendar",
   calendar: null,
+  calendarSig: null, // signature of the event set currently drawn (see renderCalendar)
   map: null,
   markers: null,
-  mapMonth: null, // first-of-month Date for the map view; null = current month
+  // The month all three views agree on (first-of-month Date; null = not resolved
+  // yet). Paging the calendar writes it via the datesSet handler, the map's own
+  // ‹/› buttons write it too, and the list filters by it — so switching views
+  // keeps the month you were looking at instead of jumping back to today.
+  month: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -55,10 +60,14 @@ const $ = (id) => document.getElementById(id);
 async function fetchAll() {
   // Static build: data is a JSON file refreshed by the GitHub Actions cron and
   // committed to the repo, not served by a live API. Same payload shape as the
-  // old GET /api/tournaments ({count, tournaments, last_refresh}). Cache-bust
-  // with the date so a fresh commit is picked up without a hard reload.
-  const bust = new Date().toISOString().slice(0, 13); // hourly granularity
-  const r = await fetch(`./tournaments.json?v=${bust}`);
+  // old GET /api/tournaments ({count, tournaments, last_refresh}).
+  //
+  // No `?v=` cache-buster: GitHub Pages serves this with `max-age=600` plus an
+  // ETag, so the browser revalidates within 10 minutes on its own and a fresh
+  // commit lands without a hard reload. A per-hour query string only forced a
+  // second download by missing the <link rel=preload> in index.html, which URL-
+  // matches exactly.
+  const r = await fetch("./tournaments.json");
   if (!r.ok) throw new Error("fetch failed");
   const j = await r.json();
   state.all = j.tournaments || [];
@@ -103,7 +112,7 @@ function buildStatesList(states) {
       else state.preferredStates.delete(cb.value);
       savePreferredStates(state.preferredStates);
       updateStatesSummary();
-      render();
+      scheduleRender();
     });
   });
   updateStatesSummary();
@@ -319,6 +328,23 @@ function collapseGroups(rows) {
   return out;
 }
 
+// Redrawing the month grid is ~250–550ms of unavoidable FullCalendar layout for
+// this many events. Called straight from a click handler, that work runs before
+// the browser paints, so the checkbox itself appears frozen until it finishes.
+// Yielding one frame first lets the checkbox tick and the cursor update
+// immediately, then does the heavy work — same total time, but the UI responds
+// at once. Coalescing also means dragging over several checkboxes renders once.
+let renderQueued = false;
+
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    render();
+  });
+}
+
 function render() {
   const filtered = collapseGroups(applyFilters(state.all));
   const banner = $("empty-banner");
@@ -334,6 +360,26 @@ function render() {
   if (state.view === "calendar") renderCalendar(filtered);
   else if (state.view === "map") renderMap(filtered);
   else renderList(filtered);
+  // The list and map narrow to state.month, so they own their own "nothing in
+  // this month" message; only hide the shared banner for them once it has been
+  // set above.
+  if (state.view === "list" && filtered.length > 0) {
+    const rows = filtered.filter((t) => inMonth(t, monthKey(state.month)));
+    if (rows.length === 0) {
+      banner.classList.remove("hidden");
+      banner.textContent = `No tournaments in ${monthLabel(state.month)}.`;
+    }
+  }
+}
+
+function calendarEvents(rows) {
+  return rows.map((t) => ({
+    title: t.name + (t._grouped ? `  ×${t._variant_count}` : ""),
+    start: t.start_date,
+    end: t.end_date ? addDay(t.end_date) : null,
+    color: t.is_fide_rated ? "#2f5d3f" : "#7a7a7a",
+    extendedProps: { _t: t },
+  }));
 }
 
 function renderCalendar(rows) {
@@ -341,34 +387,60 @@ function renderCalendar(rows) {
   if (!state.calendar) {
     state.calendar = new FullCalendar.Calendar(el, {
       initialView: "dayGridMonth",
+      initialDate: state.month || undefined,
       headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
       height: "100%",
-      // Busy days carry 80+ events (2026-08-01). Without a cap the month grid
-      // renders every one stacked in its cell — a ~4000px-tall body inside a
-      // ~670px viewport. dayMaxEvents fits the events to the cell and puts the
-      // rest behind a "+N more" popover.
+      // Busy days carry 100+ events. Without a cap the month grid stacks every
+      // one in its cell — a ~4900px-tall body inside a ~685px viewport, which
+      // spilled over the page. `true` fits each cell exactly and moves the rest
+      // behind a "+N more" popover; a fixed number (4) overflows again on the
+      // busiest rows, so let it measure.
       dayMaxEvents: true,
+      // Stretch the week rows to fill the height in one pass. Without it,
+      // dayMaxEvents:true measures and re-measures row heights: ~470ms per
+      // re-render vs ~300ms with it, same final layout.
+      expandRows: true,
+      // Pass the events up front: constructing empty and then loading them
+      // renders the whole grid twice (~370ms + ~700ms). One pass is ~830ms.
+      events: calendarEvents(rows),
+      // Paging the calendar is the source of truth for the month the other two
+      // views show. Without this, prev/next moved the grid only and the map and
+      // list stayed on the month the page opened at.
+      datesSet: (info) => {
+        // currentStart is the first of the displayed month (activeStart would be
+        // the leading Sunday, which can belong to the previous month).
+        const m = new Date(info.view.currentStart.getFullYear(), info.view.currentStart.getMonth(), 1);
+        if (state.month && monthKey(state.month) === monthKey(m)) return;
+        state.month = m;
+        syncMonthLabel();
+      },
       eventClick: (info) => {
         const t = info.event.extendedProps._t;
         if (t) showModal(t);
       },
     });
+    state.calendarSig = rows.length + ":" + rows.map((t) => t.id).join(",");
     state.calendar.render();
+    return;
   }
-  // Load events as ONE source, never addEvent() in a loop. v6's
-  // batchRendering() is a no-op, so each addEvent() dispatches its own state
-  // update and re-renders the whole grid: 350 events took ~3.6s that way and
-  // froze the page ("this page is slowing down Firefox"). One source: ~60ms.
-  state.calendar.removeAllEventSources();
-  state.calendar.addEventSource(
-    rows.map((t) => ({
-      title: t.name + (t._grouped ? `  ×${t._variant_count}` : ""),
-      start: t.start_date,
-      end: t.end_date ? addDay(t.end_date) : null,
-      color: t.is_fide_rated ? "#2f5d3f" : "#7a7a7a",
-      extendedProps: { _t: t },
-    }))
-  );
+  // Follow a month picked in another view (the map's or list's ‹/› buttons).
+  // Do this BEFORE reloading events: gotoDate() re-renders the grid, so reusing
+  // that same render for the new events avoids doing the work twice.
+  const needsGoto = state.month && monthKey(state.calendar.view.currentStart) !== monthKey(state.month);
+
+  // Reloading events costs ~300ms of grid layout, so skip it when the event set
+  // is identical to what's already drawn — which is the case for a plain month
+  // page, where only the date range changed. Compare a cheap signature rather
+  // than the objects themselves.
+  const sig = rows.length + ":" + rows.map((t) => t.id).join(",");
+  if (sig !== state.calendarSig) {
+    state.calendarSig = sig;
+    // setOption("events", …) replaces the source and re-renders once. The old
+    // removeAllEventSources()+addEventSource() pair tore the grid down and
+    // rebuilt it — ~580ms, which is what made every checkbox click lag.
+    state.calendar.setOption("events", calendarEvents(rows));
+  }
+  if (needsGoto) state.calendar.gotoDate(state.month);
 }
 
 function addDay(iso) {
@@ -397,7 +469,7 @@ function eventMonths(t) {
   return months;
 }
 
-function defaultMapMonth(rows) {
+function defaultMonth(rows) {
   // Current month if it has events, else the earliest month that does — so the
   // map never opens on an empty view.
   const now = new Date();
@@ -409,8 +481,37 @@ function defaultMapMonth(rows) {
   return new Date(y, m - 1, 1);
 }
 
+function monthLabel(d) {
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function syncMonthLabel() {
+  // The map toolbar and the list heading both show state.month; the calendar
+  // draws its own title.
+  if (state.month) $("map-month").textContent = monthLabel(state.month);
+}
+
+function shiftMonth(delta) {
+  const base = state.month || defaultMonth(collapseGroups(applyFilters(state.all)));
+  state.month = new Date(base.getFullYear(), base.getMonth() + delta, 1);
+  syncMonthLabel();
+  scheduleRender();
+}
+
+function inMonth(t, key) {
+  return eventMonths(t).includes(key);
+}
+
 function renderMap(rows) {
   const el = $("map");
+  // Leaflet is deferred (it's ~182KB and only this view needs it), so it may not
+  // have executed yet if the user hits the Map tab immediately. Retry on the
+  // next frame rather than throwing.
+  if (typeof L === "undefined" || !L.markerClusterGroup) {
+    $("map-month").textContent = "Loading map…";
+    setTimeout(() => { if (state.view === "map") render(); }, 60);
+    return;
+  }
   if (!state.map) {
     state.map = L.map(el, { scrollWheelZoom: true }).setView([22.5, 80], 5);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -420,14 +521,11 @@ function renderMap(rows) {
     state.markers = L.markerClusterGroup({ maxClusterRadius: 45 });
     state.map.addLayer(state.markers);
   }
-  if (!state.mapMonth) state.mapMonth = defaultMapMonth(rows);
+  if (!state.month) state.month = defaultMonth(rows);
 
-  const wantKey = monthKey(state.mapMonth);
-  $("map-month").textContent = state.mapMonth.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
-  const monthRows = rows.filter((t) => eventMonths(t).includes(wantKey));
+  const wantKey = monthKey(state.month);
+  syncMonthLabel();
+  const monthRows = rows.filter((t) => inMonth(t, wantKey));
 
   state.markers.clearLayers();
 
@@ -496,12 +594,6 @@ function jitter(lat, lng, n) {
   return [lat + radius * Math.cos(angle), lng + radius * Math.sin(angle)];
 }
 
-function shiftMapMonth(delta) {
-  const base = state.mapMonth || defaultMapMonth(collapseGroups(applyFilters(state.all)));
-  state.mapMonth = new Date(base.getFullYear(), base.getMonth() + delta, 1);
-  render();
-}
-
 function locationTooltip(group) {
   const items = group.items;
   const where = [items[0].city, items[0].state].filter(Boolean).join(", ");
@@ -561,13 +653,21 @@ function showLocationModal(group) {
   $("modal").classList.remove("hidden");
 }
 
-function renderList(rows) {
+function renderList(allRows) {
   const el = $("list");
+  // Show the month the other views are on, not the whole dataset — otherwise
+  // paging the calendar and switching to the list looked like nothing happened.
+  if (!state.month) state.month = defaultMonth(allRows);
+  const wantKey = monthKey(state.month);
+  const rows = allRows.filter((t) => inMonth(t, wantKey));
+  $("list-month").textContent = monthLabel(state.month);
+  $("list-count").textContent = rows.length === 1 ? "1 tournament" : `${rows.length} tournaments`;
+  const body = $("list-body");
   if (rows.length === 0) {
-    el.innerHTML = "";
+    body.innerHTML = "";
     return;
   }
-  el.innerHTML = rows.map((t) => `
+  body.innerHTML = rows.map((t) => `
     <div class="card" data-id="${t.id}">
       <div class="title">${escapeHtml(t.name)}${t._grouped ? ` <span class="badge">${t._variant_count} variants</span>` : ""}</div>
       <div class="meta-row">
@@ -581,7 +681,7 @@ function renderList(rows) {
       </div>
     </div>
   `).join("");
-  el.querySelectorAll(".card").forEach((c) => {
+  body.querySelectorAll(".card").forEach((c) => {
     c.addEventListener("click", () => {
       const t = rows.find((x) => x.id === c.dataset.id);
       if (t) showModal(t);
@@ -639,32 +739,39 @@ function showModal(t) {
 }
 
 function bind() {
-  $("f-format").addEventListener("change", (e) => { state.filters.format = e.target.value; render(); });
-  $("f-age").addEventListener("change", (e) => { state.filters.age = e.target.value; render(); });
-  $("f-open").addEventListener("change", (e) => { state.filters.openness = e.target.value; render(); });
-  $("f-source").addEventListener("change", (e) => { state.filters.source = e.target.value; render(); });
-  $("f-fide").addEventListener("change", (e) => { state.filters.fideOnly = e.target.checked; render(); });
-  $("f-collapse").addEventListener("change", (e) => { state.collapse = e.target.checked; render(); });
+  // All filter inputs go through scheduleRender() so the control itself repaints
+  // before the grid redraw blocks the main thread.
+  $("f-format").addEventListener("change", (e) => { state.filters.format = e.target.value; scheduleRender(); });
+  $("f-age").addEventListener("change", (e) => { state.filters.age = e.target.value; scheduleRender(); });
+  $("f-open").addEventListener("change", (e) => { state.filters.openness = e.target.value; scheduleRender(); });
+  $("f-source").addEventListener("change", (e) => { state.filters.source = e.target.value; scheduleRender(); });
+  $("f-fide").addEventListener("change", (e) => { state.filters.fideOnly = e.target.checked; scheduleRender(); });
+  $("f-collapse").addEventListener("change", (e) => { state.collapse = e.target.checked; scheduleRender(); });
 
-  $("map-prev").addEventListener("click", () => shiftMapMonth(-1));
-  $("map-next").addEventListener("click", () => shiftMapMonth(1));
-  $("map-today").addEventListener("click", () => {
+  const gotoToday = () => {
     const now = new Date();
-    state.mapMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    render();
-  });
+    state.month = new Date(now.getFullYear(), now.getMonth(), 1);
+    syncMonthLabel();
+    scheduleRender();
+  };
+  $("map-prev").addEventListener("click", () => shiftMonth(-1));
+  $("map-next").addEventListener("click", () => shiftMonth(1));
+  $("map-today").addEventListener("click", gotoToday);
+  $("list-prev").addEventListener("click", () => shiftMonth(-1));
+  $("list-next").addEventListener("click", () => shiftMonth(1));
+  $("list-today").addEventListener("click", gotoToday);
 
   $("states-all").addEventListener("click", () => {
     state.preferredStates = new Set(INDIAN_STATES);
     savePreferredStates(state.preferredStates);
     buildStatesList(INDIAN_STATES);
-    render();
+    scheduleRender();
   });
   $("states-clear").addEventListener("click", () => {
     state.preferredStates = new Set();
     savePreferredStates(state.preferredStates);
     buildStatesList(INDIAN_STATES);
-    render();
+    scheduleRender();
   });
 
   document.querySelectorAll(".view-tabs button").forEach((b) => {
