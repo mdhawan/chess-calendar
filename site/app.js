@@ -716,6 +716,13 @@ function showModal(t) {
       `).join("")}
     </ul>
   ` : "";
+  // The export omits fields that are empty on every row (see
+  // scripts/export_json.py), so these rows would otherwise be a run of
+  // permanent "—". Emit each one only when there's something to show — that
+  // also means the row comes back on its own if a source starts supplying it.
+  const optional = (label, value) =>
+    value ? `<dt>${label}</dt><dd>${value}</dd>` : "";
+
   $("modal-body").innerHTML = `
     <h2>${escapeHtml(t.name)}${t._grouped ? ` <span class="badge">${t._variant_count}</span>` : ""}</h2>
     <dl>
@@ -724,12 +731,12 @@ function showModal(t) {
       <dt>Venue</dt><dd>${escapeHtml(t.venue || "—")}</dd>
       <dt>Format</dt><dd>${escapeHtml(t.format || "—")}${t.time_control ? ` (${escapeHtml(t.time_control)})` : ""}</dd>
       <dt>Rated</dt><dd>${t.is_fide_rated ? "FIDE " : ""}${t.is_aicf_rated ? "AICF" : ""}${!t.is_fide_rated && !t.is_aicf_rated ? "Unrated/local" : ""}</dd>
-      <dt>Age categories</dt><dd>${(t.age_categories || []).join(", ") || "—"}</dd>
-      <dt>Entry fee</dt><dd>${t.entry_fee_inr != null ? "₹" + t.entry_fee_inr : "—"}</dd>
-      <dt>Prize fund</dt><dd>${t.prize_fund_inr != null ? "₹" + t.prize_fund_inr : "—"}</dd>
-      <dt>Registration deadline</dt><dd>${t.registration_deadline || "—"}</dd>
+      ${optional("Age categories", escapeHtml((t.age_categories || []).join(", ")))}
+      ${optional("Entry fee", t.entry_fee_inr != null ? "₹" + escapeHtml(t.entry_fee_inr) : "")}
+      ${optional("Prize fund", t.prize_fund_inr != null ? "₹" + escapeHtml(t.prize_fund_inr) : "")}
+      ${optional("Registration deadline", escapeHtml(t.registration_deadline || ""))}
       <dt>Organizer</dt><dd>${escapeHtml(t.organizer || "—")}</dd>
-      <dt>Contact</dt><dd>${escapeHtml(t.contact || "—")}</dd>
+      ${optional("Contact", escapeHtml(t.contact || ""))}
       <dt>Source</dt><dd>${t.source_url ? `<a href="${t.source_url}" target="_blank" rel="noopener">${escapeHtml(t.source)}</a>` : escapeHtml(t.source)}</dd>
       ${t.registration_url ? `<dt>Register</dt><dd><a href="${t.registration_url}" target="_blank" rel="noopener">Open form</a></dd>` : ""}
     </dl>

@@ -27,10 +27,37 @@ from backend.refresh import refresh_all  # noqa: E402
 OUT = ROOT / "site" / "tournaments.json"
 
 
+def _is_empty(v) -> bool:
+    return v is None or v == [] or v == ""
+
+
+def drop_empty_columns(rows: list[dict]) -> tuple[list[dict], list[str]]:
+    """Omit fields that are empty on *every* row.
+
+    The Tournament model has more fields than any live source fills in — no
+    adapter ever sets age_categories, rating_categories, entry_fee_inr,
+    prize_fund_inr, expected_field_size or registration_deadline, and the two
+    that touch `contact` (chessbase.in, manual CSV) currently return 0 rows. So
+    ~20% of the served JSON was keys whose value was null on all 597 rows.
+
+    Computed per run rather than hardcoded: the day a source starts populating
+    one of these, the field reappears on its own with no change here. The site
+    guards every read (``t.x || "—"``, ``t.x != null``), so an absent key
+    renders the same as a null one.
+    """
+    if not rows:
+        return rows, []
+    dead = sorted(k for k in rows[0] if all(_is_empty(r.get(k)) for r in rows))
+    if not dead:
+        return rows, []
+    return [{k: v for k, v in r.items() if k not in dead} for r in rows], dead
+
+
 def main() -> int:
     summary = refresh_all()
 
     rows = query_tournaments()  # same defaults as GET /api/tournaments
+    rows, dropped = drop_empty_columns(rows)
     payload = {
         "count": len(rows),
         "tournaments": rows,
@@ -47,6 +74,8 @@ def main() -> int:
 
     ok = sum(1 for s in summary["sources"] if not s["error"])
     print(f"[export] wrote {len(rows)} tournaments to {OUT} ({ok}/{len(summary['sources'])} sources ok)")
+    if dropped:
+        print(f"[export] omitted {len(dropped)} all-empty fields: {', '.join(dropped)}")
     return 0
 
 
