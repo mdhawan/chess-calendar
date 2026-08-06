@@ -41,8 +41,21 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
       - uses: actions/configure-pages@v5
+      # deploy-pages resolves the artifact by *name* over the whole workflow
+      # run, not per attempt — so a re-run's upload sits alongside the first
+      # attempt's and the lookup dies on "Multiple artifacts named github-pages
+      # ... Artifact count is 2". Scoping the name to the attempt keeps a
+      # re-run's lookup unambiguous. (Pages deploys by artifact id, so the name
+      # itself doesn't have to be "github-pages".)
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-${{ github.run_attempt }}
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+          # Pages' backend sometimes needs longer than the action's 10-minute
+          # default to report a deployment complete, and on timeout the action
+          # cancels a deploy that was seconds from landing. 20 minutes.
+          timeout: 1200000
